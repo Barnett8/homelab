@@ -3,7 +3,7 @@
 set -e  # Exit on error
 
 echo "=========================================="
-echo "Pi by Earendil Works - Node.js Installer"
+echo "Pi by Earendil Works - Installer"
 echo "=========================================="
 
 # Colors for output
@@ -16,39 +16,50 @@ NC='\033[0m' # No Color
 # Configuration Values
 LLAMA_BASE_URL="http://192.168.0.102:8080/v1"
 LLAMA_MODEL_ID="unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_XL"
-PI_DIR="$HOME/pi-workspace"
-CONFIG_FILE="$PI_DIR/pi/config.json"
+PI_AGENT_DIR="$HOME/.pi/agent"
+MODELS_FILE="$PI_AGENT_DIR/models.json"
+NPM_PREFIX="$HOME/.local"
+PI_BIN_DIR="$NPM_PREFIX/bin"
 
-# Verify Node version
-NODE_VERSION=$(node --version)
-NPM_VERSION=$(npm --version)
-echo -e "${GREEN}Node.js $NODE_VERSION installed.${NC}"
-echo -e "${GREEN}npm $NPM_VERSION installed.${NC}"
+# Step 1: Install Pi non-interactively
+# We call npm directly (rather than piping install.sh through sh) so this
+# never blocks on a confirmation prompt. This mirrors exactly what the
+# official installer runs when npm's global prefix isn't writable.
+echo -e "${YELLOW}[1/4] Installing Pi...${NC}"
 
-# Step 2: Prepare Workspace
-echo -e "${YELLOW}[2/5] Preparing workspace...${NC}"
-mkdir -p "$PI_DIR"
-cd "$PI_DIR"
-
-# Clone if not already present
-if [ ! -d "pi" ]; then
-    git clone https://github.com/earendil-works/pi.git
+if ! command -v node >/dev/null 2>&1; then
+    echo -e "${RED}❌ Node.js not found. Run bootstrap_apt.sh (or install Node \u226520.6.0) first.${NC}"
+    exit 1
 fi
 
-cd "$PI_DIR/pi"
+npm install -g --ignore-scripts --min-release-age=0 --prefix "$NPM_PREFIX" @earendil-works/pi-coding-agent
 
-# Step 3: Install Dependencies
-echo -e "${YELLOW}[3/5] Installing Pi dependencies...${NC}"
-npm install
+# Step 2: Ensure the install location is on PATH, now and in future shells
+echo -e "${YELLOW}[2/4] Configuring PATH...${NC}"
 
-# Step 4: Create Configuration File
-echo -e "${YELLOW}[4/5] Creating Pi configuration...${NC}"
+PATH_LINE="export PATH=\"$PI_BIN_DIR:\$PATH\""
+if ! grep -qsF "$PATH_LINE" "$HOME/.bashrc" 2>/dev/null; then
+    echo "$PATH_LINE" >> "$HOME/.bashrc"
+    echo -e "${BLUE}Added $PI_BIN_DIR to PATH in ~/.bashrc${NC}"
+else
+    echo -e "${BLUE}~/.bashrc already has $PI_BIN_DIR on PATH${NC}"
+fi
 
-# Pi usually looks for config in .pi/ or config.json in the root
-# We'll create it in the root and also check .pi/ directory
-mkdir -p .pi
+# Apply to this script's current shell too, so verification below works
+# without requiring a restart.
+export PATH="$PI_BIN_DIR:$PATH"
 
-cat > "$CONFIG_FILE" <<EOF
+if ! command -v pi >/dev/null 2>&1; then
+    echo -e "${RED}❌ pi command not found even after updating PATH. Check $PI_BIN_DIR exists.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Pi installed: $(pi --version 2>/dev/null || echo 'version check unavailable')${NC}"
+
+# Step 3: Write custom provider config
+echo -e "${YELLOW}[3/4] Configuring llama-cpp provider...${NC}"
+mkdir -p "$PI_AGENT_DIR"
+
+cat > "$MODELS_FILE" <<EOF
 {
   "providers": {
     "llama-cpp": {
@@ -73,32 +84,18 @@ cat > "$CONFIG_FILE" <<EOF
 }
 EOF
 
-echo -e "${BLUE}Configuration saved to: $CONFIG_FILE${NC}"
+echo -e "${BLUE}Provider config saved to: $MODELS_FILE${NC}"
 
-# Also copy to .pi/ directory if that's where Pi expects it
-cp "$CONFIG_FILE" ".pi/config.json"
-echo -e "${BLUE}Configuration also copied to: .pi/config.json${NC}"
+# Step 4: Verify
+echo -e "${YELLOW}[4/4] Verifying setup...${NC}"
 
-# Step 5: Verify and Test
-echo -e "${YELLOW}[5/5] Verifying installation...${NC}"
-
-# Check if the pi command is available (it should be in node_modules/.bin)
-if [ -f "node_modules/.bin/pi" ]; then
-    echo -e "${GREEN}✅ Pi binary found: node_modules/.bin/pi${NC}"
+if node -e "JSON.parse(require('fs').readFileSync('$MODELS_FILE', 'utf8'))" 2>/dev/null; then
+    echo -e "${GREEN}✅ models.json is valid JSON.${NC}"
 else
-    echo -e "${RED}❌ Pi binary not found. Check npm install output.${NC}"
+    echo -e "${RED}❌ models.json is invalid JSON.${NC}"
     exit 1
 fi
 
-# Verify config JSON
-if node -e "JSON.parse(require('fs').readFileSync('$CONFIG_FILE', 'utf8'))" 2>/dev/null; then
-    echo -e "${GREEN}✅ Configuration file is valid JSON.${NC}"
-else
-    echo -e "${RED}❌ Configuration file is invalid JSON.${NC}"
-    exit 1
-fi
-
-# Verify connectivity to llama-cpp
 echo -e "${YELLOW}Checking connectivity to $LLAMA_BASE_URL...${NC}"
 if curl -s --max-time 5 "$LLAMA_BASE_URL/models" > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Connection to model server successful!${NC}"
@@ -112,19 +109,16 @@ echo "Installation Complete!"
 echo "=========================================="
 echo "To use Pi:"
 echo ""
-echo "  1. Navigate to the Pi directory:"
-echo "     cd $PI_DIR/pi"
+echo "  1. Run it from any directory (new shells pick up PATH automatically):"
+echo "     pi"
 echo ""
-echo "  2. Run Pi (try one of these):"
-echo "     npx pi"
-echo "     ./node_modules/.bin/pi"
-echo ""
-echo "  3. If Pi asks for a model, select the one matching:"
+echo "  2. Select your model with /model, matching:"
 echo "     $LLAMA_MODEL_ID"
 echo ""
 echo "⚠️  Troubleshooting:"
-echo "   - If 'npx pi' fails, try: node ./node_modules/pi/bin/pi.js"
-echo "   - Check config: cat config.json"
+echo "   - If 'pi' isn't found in a shell that predates this script, run:"
+echo "     source ~/.bashrc"
+echo "   - Check provider config: cat $MODELS_FILE"
 echo "   - Check connectivity: curl $LLAMA_BASE_URL/models"
+echo "   - Global settings live at: $PI_AGENT_DIR/settings.json"
 echo "=========================================="
-
