@@ -5,7 +5,7 @@ Automates the setup of system dependencies and Vim configuration on a new machin
 ```bash
 mkdir bootstrap_env && cd bootstrap_env \
 && for f in bootstrap_env.sh bootstrap_apt.sh bootstrap_vim.sh bootstrap_pi.sh; do \
-     curl -fsSLO "https://raw.githubusercontent.com/<user>/homelab/main/bootstrap_env/$f"; \
+     curl -fsSLO "https://raw.githubusercontent.com/Barnett8/homelab/main/bootstrap_env/$f"; \
    done \
 && chmod +x *.sh \
 && ./bootstrap_env.sh
